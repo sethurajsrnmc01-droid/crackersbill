@@ -3,11 +3,14 @@
  * Pure Vanilla JavaScript Application Logic
  */
 
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxwrG_yNWNZ0iP7Ajp9G20_SSEj2D9ZJd-GIFyBYy4MLHTSElgITnHzr54ZFbCztDHP/exec";
+
 document.addEventListener('DOMContentLoaded', () => {
   // Application State
   const state = {
     cart: {}, // productId -> quantity
     activeCategory: 'ALL',
+    searchQuery: '',
     invoice: {
       date: getTodayDateString(),
       invoiceNo: generateInvoiceNumber(),
@@ -18,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const orderTableBody = document.getElementById('orderTableBody');
   const categoryPillsContainer = document.getElementById('categoryPills');
+  const productSearchInput = document.getElementById('productSearchInput');
+  const btnClearSearch = document.getElementById('btnClearSearch');
   
   // Dynamic Stats Summary Elements
   const statTotalItems = document.getElementById('statTotalItems');
@@ -27,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Minimal Top Bar Inputs
   const invDateInput = document.getElementById('invDate');
+  const invNoInput = document.getElementById('invNoInput');
   const paymentModeInput = document.getElementById('paymentMode');
 
   // Live Invoice Sheet Elements
@@ -39,14 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const invNetPayable = document.getElementById('invNetPayable');
   const invAmountWords = document.getElementById('invAmountWords');
 
-  // Preview Modal Elements
-  const previewModal = document.getElementById('previewModal');
-  const modalA4BillContainer = document.getElementById('modalA4BillContainer');
-  const btnPreviewBill = document.getElementById('btnPreviewBill');
-  const btnModalClose = document.getElementById('btnModalClose');
-  const btnModalCloseCross = document.getElementById('btnModalCloseCross');
-  const btnModalPrint = document.getElementById('btnModalPrint');
-  const btnModalDownload = document.getElementById('btnModalDownload');
+  // Primary Action Buttons
+  const btnPrintBill = document.getElementById('btnPrintBill');
+  const btnDownloadPDF = document.getElementById('btnDownloadPDF');
+  const btnSharePDF = document.getElementById('btnSharePDF');
 
   // Sales History Modal Elements
   const salesHistoryModal = document.getElementById('salesHistoryModal');
@@ -69,13 +71,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function init() {
     setupCategoryPills();
+    setupSearchListener();
     setupTopBarListeners();
     renderOrderTable();
     updateCalculations();
     setupEventListeners();
-    setupModalEventListeners();
+    setupActionButtons();
     setupHistoryEventListeners();
     
+    // Offline sync setup
+    window.addEventListener('online', syncOfflineBills);
+    syncOfflineBills();
+
+    // Fetch and load next sequential bill number from Google Sheets backend
+    loadNextBillNumber();
+
+    // Fetch and restore Sales History directly from Google Sheets if LocalStorage is empty
+    fetchSalesHistoryFromSheets();
+
     // Default today's date
     if (invDateInput) invDateInput.value = state.invoice.date;
   }
@@ -99,22 +112,54 @@ document.addEventListener('DOMContentLoaded', () => {
     return dateStr;
   }
 
-  // Generate unique Sivakasi invoice bill number
+  // Extract numerical sequence from bill number string (e.g. SURYA-2026-1001 -> 1001)
+  function extractSequenceNumber(billNoStr) {
+    if (!billNoStr || typeof billNoStr !== 'string') return 0;
+    const match = billNoStr.match(/(\d+)\s*$/);
+    if (match && match[1]) {
+      const num = parseInt(match[1], 10);
+      return isNaN(num) ? 0 : num;
+    }
+    return 0;
+  }
+
+  // Get the highest sequence number present in sales history
+  function getHighestSequenceFromHistory() {
+    const history = getSalesHistoryFromStorage() || [];
+    let maxSeq = 0;
+    history.forEach(item => {
+      const billNoStr = item.billNo || item.id || '';
+      const seq = extractSequenceNumber(billNoStr);
+      if (seq > maxSeq) {
+        maxSeq = seq;
+      }
+    });
+    return maxSeq;
+  }
+
+  // Generate unique sequential Surya Crackers invoice bill number
   function generateInvoiceNumber() {
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
     const year = new Date().getFullYear();
-    return `SVK-${year}-${randomNum}`;
+    const historyMax = getHighestSequenceFromHistory();
+    // Default baseline is 1000 if no history records exist yet
+    const baseSeq = historyMax > 0 ? historyMax : 1000;
+    const nextSeq = baseSeq + 1;
+    const formattedSeq = nextSeq < 1000 ? String(nextSeq).padStart(4, '0') : String(nextSeq);
+    return `SURYA-${year}-${formattedSeq}`;
   }
 
   // Build Category Pill Buttons
   function setupCategoryPills() {
     if (!categoryPillsContainer) return;
+    const catalog = (typeof CRACKERS_CATALOG !== 'undefined' && Array.isArray(CRACKERS_CATALOG)) ? CRACKERS_CATALOG : [];
     
     let html = `<button class="pill-btn active" data-category="ALL">💥 ALL CATEGORIES</button>`;
     
-    CRACKERS_CATALOG.forEach(cat => {
-      const shortName = cat.category.split('/')[0].trim();
-      html += `<button class="pill-btn" data-category="${cat.category}">${shortName}</button>`;
+    catalog.forEach(cat => {
+      if (cat && cat.category) {
+        const shortName = cat.category.split('/')[0].trim();
+        html += `<button class="pill-btn" data-category="${cat.category}">${shortName}</button>`;
+      }
     });
     
     categoryPillsContainer.innerHTML = html;
@@ -129,11 +174,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Listen to Top Bar Changes (Date & Payment Mode)
+  // Setup Product Search Input Listener
+  function setupSearchListener() {
+    if (!productSearchInput) return;
+
+    productSearchInput.addEventListener('input', (e) => {
+      const rawVal = (e.target && e.target.value !== undefined && e.target.value !== null) ? e.target.value : '';
+      const query = rawVal.toString().trim();
+      state.searchQuery = query;
+
+      if (btnClearSearch) {
+        if (query.length > 0) {
+          btnClearSearch.classList.remove('hidden');
+        } else {
+          btnClearSearch.classList.add('hidden');
+        }
+      }
+
+      renderOrderTable();
+    });
+
+    if (btnClearSearch) {
+      btnClearSearch.addEventListener('click', () => {
+        productSearchInput.value = '';
+        state.searchQuery = '';
+        btnClearSearch.classList.add('hidden');
+        renderOrderTable();
+        productSearchInput.focus();
+      });
+    }
+  }
+
+  // Listen to Top Bar Changes (Date, Bill No & Payment Mode)
   function setupTopBarListeners() {
     if (invDateInput) {
       invDateInput.addEventListener('change', (e) => {
         state.invoice.date = e.target.value;
+        renderLiveInvoice();
+      });
+    }
+    if (invNoInput) {
+      invNoInput.addEventListener('input', (e) => {
+        state.invoice.invoiceNo = e.target.value.trim();
         renderLiveInvoice();
       });
     }
@@ -154,7 +236,8 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
         state.cart = {};
-        state.invoice.invoiceNo = generateInvoiceNumber(); // Generate fresh bill no
+        state.invoice.invoiceNo = generateInvoiceNumber(); // Generate fresh sequential bill no
+        if (invNoInput) invNoInput.value = state.invoice.invoiceNo;
         renderOrderTable();
         updateCalculations();
         showToast('All quantities reset & new bill created!');
@@ -162,47 +245,113 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Modal Event Handlers
-  function setupModalEventListeners() {
-    if (btnPreviewBill) {
-      btnPreviewBill.addEventListener('click', openPreviewModal);
+  // Reset all item quantities, fetch new unique Bill Number, and refresh UI
+  function resetFormForNewBill() {
+    state.cart = {};
+    state.invoice.date = getTodayDateString();
+    state.invoice.paymentMode = 'Cash';
+
+    if (invDateInput) invDateInput.value = state.invoice.date;
+    if (paymentModeInput) paymentModeInput.value = 'Cash';
+
+    // Load next sequential bill number from backend or local sequence
+    loadNextBillNumber();
+    renderOrderTable();
+    updateCalculations();
+  }
+
+  // Primary Action Button Handlers
+  function setupActionButtons() {
+    const btnPrintBill = document.getElementById('btnPrintBill');
+    const btnPrintOnly = document.getElementById('btnPrintOnly');
+    const btnPrintDropdownToggle = document.getElementById('btnPrintDropdownToggle');
+    const printDropdownMenu = document.getElementById('printDropdownMenu');
+
+    if (btnPrintBill) {
+      btnPrintBill.addEventListener('click', () => {
+        if (printDropdownMenu) printDropdownMenu.classList.add('hidden');
+        
+        let totalQty = 0;
+        Object.keys(state.cart).forEach(id => {
+          if (state.cart[id] > 0) totalQty += state.cart[id];
+        });
+
+        if (totalQty === 0) {
+          showToast('Cart is empty! Select items to print bill.');
+          return;
+        }
+
+        // 1. Record in Sales History & push to Google Sheets with "Print" action mode
+        saveInvoiceToSheet('Print');
+
+        // 2. Open native print dialog
+        window.print();
+
+        // 3. Auto-reset for new bill & fetch new unique bill number
+        resetFormForNewBill();
+        showToast('Bill printed & saved! Reset for new bill.');
+      });
     }
 
-    if (btnModalClose) {
-      btnModalClose.addEventListener('click', closePreviewModal);
-    }
-
-    if (btnModalCloseCross) {
-      btnModalCloseCross.addEventListener('click', closePreviewModal);
-    }
-
-    if (btnModalPrint) {
-      btnModalPrint.addEventListener('click', () => {
-        saveCurrentInvoiceToHistory();
+    if (btnPrintOnly) {
+      btnPrintOnly.addEventListener('click', () => {
+        if (printDropdownMenu) printDropdownMenu.classList.add('hidden');
         window.print();
       });
     }
 
-    if (btnModalDownload) {
-      btnModalDownload.addEventListener('click', () => {
-        saveCurrentInvoiceToHistory();
+    if (btnPrintDropdownToggle && printDropdownMenu) {
+      btnPrintDropdownToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        printDropdownMenu.classList.toggle('hidden');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!printDropdownMenu.contains(e.target) && e.target !== btnPrintDropdownToggle) {
+          printDropdownMenu.classList.add('hidden');
+        }
+      });
+    }
+
+    const btnSaveInvoice = document.getElementById('btnSaveInvoice');
+    if (btnSaveInvoice) {
+      btnSaveInvoice.addEventListener('click', () => {
+        if (printDropdownMenu) printDropdownMenu.classList.add('hidden');
+        
+        let totalQty = 0;
+        Object.keys(state.cart).forEach(id => {
+          if (state.cart[id] > 0) totalQty += state.cart[id];
+        });
+
+        if (totalQty === 0) {
+          showToast('Cart is empty! Select items to save invoice.');
+          return;
+        }
+
+        saveInvoiceToSheet('Save Invoice');
+        showToast('Invoice Saved Successfully!');
+
+        // Clear billing screen and generate new bill number for next invoice
+        resetFormForNewBill();
+      });
+    }
+
+    if (btnDownloadPDF) {
+      btnDownloadPDF.addEventListener('click', () => {
         downloadPDF();
       });
     }
 
-    if (previewModal) {
-      previewModal.addEventListener('click', (e) => {
-        if (e.target === previewModal) {
-          closePreviewModal();
-        }
+    if (btnSharePDF) {
+      btnSharePDF.addEventListener('click', () => {
+        sharePDF();
       });
     }
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (previewModal && !previewModal.classList.contains('hidden')) {
-          closePreviewModal();
-        } else if (salesHistoryModal && !salesHistoryModal.classList.contains('hidden')) {
+        if (printDropdownMenu) printDropdownMenu.classList.add('hidden');
+        if (salesHistoryModal && !salesHistoryModal.classList.contains('hidden')) {
           closeSalesHistoryModal();
         }
       }
@@ -275,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getSalesHistoryFromStorage() {
     try {
-      const saved = localStorage.getItem('sivakasi_sales_history');
+      const saved = localStorage.getItem('sivakasi_sales_history') || localStorage.getItem('salesHistory');
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       console.error('Error loading sales history:', e);
@@ -283,8 +432,196 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Save current active invoice to localStorage sales history
-  function saveCurrentInvoiceToHistory() {
+  // Fetch next sequential bill number from Google Sheets backend
+  function loadNextBillNumber() {
+    const localNext = generateInvoiceNumber();
+    state.invoice.invoiceNo = localNext;
+
+    const billNoInput = document.getElementById('billNoInput') || invNoInput;
+    if (invNoInput) invNoInput.value = localNext;
+    if (billNoInput) billNoInput.value = localNext;
+    if (invSheetNo) invSheetNo.textContent = localNext;
+
+    if (!navigator.onLine || !SCRIPT_URL) {
+      renderLiveInvoice();
+      return Promise.resolve(localNext);
+    }
+
+    const fetchUrl = SCRIPT_URL.includes('?') ? `${SCRIPT_URL}&action=getNextBillNo` : `${SCRIPT_URL}?action=getNextBillNo`;
+
+    return fetch(fetchUrl)
+      .then(response => {
+        if (!response.ok) throw new Error('Failed to fetch next bill number');
+        return response.json();
+      })
+      .then(data => {
+        if (data && data.nextBillNo) {
+          state.invoice.invoiceNo = data.nextBillNo;
+          if (invNoInput) invNoInput.value = data.nextBillNo;
+          if (billNoInput) billNoInput.value = data.nextBillNo;
+          if (invSheetNo) invSheetNo.textContent = data.nextBillNo;
+          renderLiveInvoice();
+          return data.nextBillNo;
+        }
+        renderLiveInvoice();
+        return localNext;
+      })
+      .catch(error => {
+        console.warn('Could not fetch next bill number from Google Sheets, using local sequence:', error);
+        renderLiveInvoice();
+        return localNext;
+      });
+  }
+
+  function sendToGoogleSheets(billData, actionMode = 'Save Invoice') {
+    let scriptURL = SCRIPT_URL;
+    if (!scriptURL.startsWith('http')) {
+      scriptURL = 'https://script.google.com/macros/s/' + scriptURL + '/exec';
+    }
+    
+    const payload = {
+      billNo: billData.billNo || billData.id,
+      dateTime: billData.dateTime || (billData.displayDate ? `${billData.displayDate} ${billData.displayTime || ''}`.trim() : new Date().toLocaleString()),
+      paymentMode: billData.paymentMode || 'Cash',
+      totalMRP: billData.totalMRP || 0,
+      discount: billData.discountAmount !== undefined ? billData.discountAmount : (billData.totalSavings || 0),
+      netAmount: billData.netAmount !== undefined ? billData.netAmount : (billData.netPayable || 0),
+      totalItems: billData.totalItems !== undefined ? billData.totalItems : (billData.itemsCount !== undefined ? billData.itemsCount : (billData.items ? billData.items.length : 0)),
+      itemsSummary: billData.itemsSummary || (billData.items ? billData.items.map(i => `${i.name} (x${i.qty})`).join(', ') : ''),
+      actionMode: actionMode || billData.actionMode || 'Save Invoice'
+    };
+
+    if (!navigator.onLine) {
+      let queue = JSON.parse(localStorage.getItem('unsyncedBills')) || [];
+      queue.push(payload);
+      localStorage.setItem('unsyncedBills', JSON.stringify(queue));
+      console.log('Offline: Bill saved to offline queue.');
+      return;
+    }
+
+    fetch(scriptURL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    })
+    .then(() => console.log(`Bill synced to Google Sheets successfully with mode: ${payload.actionMode}`))
+    .catch(error => {
+      console.error('Error syncing to Google Sheets:', error);
+      let queue = JSON.parse(localStorage.getItem('unsyncedBills')) || [];
+      queue.push(payload);
+      localStorage.setItem('unsyncedBills', JSON.stringify(queue));
+      console.log('Offline: Bill saved to offline queue.');
+    });
+  }
+
+  function syncOfflineBills() {
+    if (!navigator.onLine) return;
+
+    let queue = JSON.parse(localStorage.getItem('unsyncedBills')) || [];
+    if (!queue || queue.length === 0) return;
+
+    let scriptURL = "AKfycbxwrG_yNWNZ0iP7Ajp9G20_SSEj2D9ZJd-GIFyBYy4MLHTSElgITnHzr54ZFbCztDHP";
+    if (!scriptURL.startsWith('http')) {
+      scriptURL = 'https://script.google.com/macros/s/' + scriptURL + '/exec';
+    }
+
+    const promises = queue.map(payload => {
+      return fetch(scriptURL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+    });
+
+    Promise.all(promises)
+      .then(() => {
+        localStorage.removeItem('unsyncedBills');
+        console.log('Offline bills synced to Google Sheets successfully!');
+        showToast('Online restored: Offline bills synced to Google Sheets successfully!');
+      })
+      .catch(error => console.error('Error syncing offline bills:', error));
+  }
+
+  // Fetch and restore Sales History directly from Google Sheets if LocalStorage is empty or cleared
+  function fetchSalesHistoryFromSheets() {
+    const existingHistory = getSalesHistoryFromStorage();
+    if (existingHistory && existingHistory.length > 0) {
+      // LocalStorage already has sales history
+      return;
+    }
+
+    let scriptURL = "AKfycbxwrG_yNWNZ0iP7Ajp9G20_SSEj2D9ZJd-GIFyBYy4MLHTSElgITnHzr54ZFbCztDHP";
+    if (!scriptURL.startsWith('http')) {
+      scriptURL = 'https://script.google.com/macros/s/' + scriptURL + '/exec';
+    }
+
+    if (!navigator.onLine) return;
+
+    fetch(scriptURL)
+      .then(response => {
+        if (!response.ok) throw new Error('Failed to fetch sales history from Google Sheets');
+        return response.json();
+      })
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          const restoredRecords = data.map(item => {
+            const billNo = item.billNo || item.id || generateInvoiceNumber();
+            const dateTimeStr = item.dateTime || item.timestamp || '';
+            const dateParts = dateTimeStr.split(' ');
+            const dateVal = item.date || dateParts[0] || getTodayDateString();
+            const timeVal = item.displayTime || dateParts.slice(1).join(' ') || '';
+
+            return {
+              id: billNo,
+              billNo: billNo,
+              date: dateVal,
+              timestamp: item.timestamp || dateTimeStr || new Date().toISOString(),
+              displayDate: item.displayDate || formatDateForInvoice(dateVal),
+              displayTime: timeVal,
+              paymentMode: item.paymentMode || 'Cash',
+              itemsCount: parseInt(item.totalItems || item.itemsCount || 0, 10),
+              totalItems: parseInt(item.totalItems || item.itemsCount || 0, 10),
+              totalMRP: parseFloat(item.totalMRP || 0),
+              totalSavings: parseFloat(item.discount || item.totalSavings || 0),
+              discountAmount: parseFloat(item.discount || item.totalSavings || 0),
+              netPayable: parseFloat(item.netAmount || item.netPayable || 0),
+              netAmount: parseFloat(item.netAmount || item.netPayable || 0),
+              itemsSummary: item.itemsSummary || '',
+              items: item.items || []
+            };
+          });
+
+          localStorage.setItem('sivakasi_sales_history', JSON.stringify(restoredRecords));
+          localStorage.setItem('salesHistory', JSON.stringify(restoredRecords));
+
+          // Auto-update active bill sequence if current cart is empty
+          if (Object.keys(state.cart).length === 0) {
+            state.invoice.invoiceNo = generateInvoiceNumber();
+            if (invNoInput) invNoInput.value = state.invoice.invoiceNo;
+            renderLiveInvoice();
+          }
+
+          renderSalesHistory();
+          showToast('Sales history restored from Google Sheets!');
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching sales history from Google Sheets:', error);
+      });
+  }
+
+  function saveInvoiceToSheet(actionMode = 'Save Invoice') {
+    return saveCurrentInvoiceToHistory(actionMode);
+  }
+
+  // Save current active invoice to localStorage sales history and push to Google Sheets
+  function saveCurrentInvoiceToHistory(actionMode = 'Save Invoice') {
     const selectedItems = [];
     let totalItems = 0;
     let totalActualMRP = 0;
@@ -310,22 +647,33 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    if (selectedItems.length === 0) return; // Do not save empty bills
+    if (selectedItems.length === 0) return null; // Do not save empty bills
 
     const totalSavings = totalActualMRP - netPayable;
     const now = new Date();
+    const billNo = state.invoice.invoiceNo || generateInvoiceNumber();
+    const dateTimeStr = `${formatDateForInvoice(state.invoice.date)} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`.trim();
+    const itemsSummaryStr = selectedItems.map(i => `${i.name} (x${i.qty})`).join(', ');
 
     const historyRecord = {
-      id: state.invoice.invoiceNo || generateInvoiceNumber(),
+      id: billNo,
+      billNo: billNo,
       date: state.invoice.date,
       timestamp: now.toISOString(),
+      dateTime: dateTimeStr,
       displayDate: formatDateForInvoice(state.invoice.date),
       displayTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       paymentMode: state.invoice.paymentMode || 'Cash',
       itemsCount: totalItems,
+      totalItems: totalItems,
       totalMRP: totalActualMRP,
       totalSavings: totalSavings,
+      discountAmount: totalSavings,
+      discount: totalSavings,
       netPayable: netPayable,
+      netAmount: netPayable,
+      itemsSummary: itemsSummaryStr,
+      actionMode: actionMode,
       items: selectedItems,
       cart: JSON.parse(JSON.stringify(state.cart))
     };
@@ -340,9 +688,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       localStorage.setItem('sivakasi_sales_history', JSON.stringify(history));
+      localStorage.setItem('salesHistory', JSON.stringify(history));
     } catch (e) {
       console.error('Error saving sales history:', e);
     }
+
+    // Send bill data asynchronously to Google Sheets with actionMode
+    sendToGoogleSheets(historyRecord, actionMode);
+    return historyRecord;
   }
 
   function renderSalesHistory() {
@@ -431,13 +784,13 @@ document.addEventListener('DOMContentLoaded', () => {
           state.cart = JSON.parse(JSON.stringify(record.cart || {}));
 
           if (invDateInput) invDateInput.value = record.date;
+          if (invNoInput) invNoInput.value = record.id;
           if (paymentModeInput) paymentModeInput.value = record.paymentMode;
 
           renderOrderTable();
           updateCalculations();
           closeSalesHistoryModal();
           setTimeout(() => {
-            openPreviewModal();
             showToast(`Loaded Bill ${record.id}`);
           }, 250);
         }
@@ -458,45 +811,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Open Preview Modal
-  function openPreviewModal() {
-    if (!previewModal || !modalA4BillContainer) return;
+  // Download PDF Function - Universal Multi-Page PDF Capture directly from #invoice-template
+  function downloadPDF() {
+    const invoiceTemplate = document.getElementById('invoice-template');
+    if (!invoiceTemplate) return;
 
-    const sourceA4Bill = document.getElementById('printableA4Bill');
-    if (sourceA4Bill) {
-      modalA4BillContainer.innerHTML = sourceA4Bill.outerHTML;
+    let totalQty = 0;
+    Object.keys(state.cart).forEach(id => {
+      if (state.cart[id] > 0) totalQty += state.cart[id];
+    });
+
+    if (totalQty === 0) {
+      showToast('Cart is empty! Select items to download PDF.');
+      return;
     }
 
-    previewModal.classList.remove('hidden');
-    void previewModal.offsetWidth;
-    previewModal.classList.add('show');
-  }
+    // Save bill to Sales History & sync to Google Sheets with "PDF Download" action mode
+    saveInvoiceToSheet('PDF Download');
+    renderSalesHistory();
 
-  // Close Preview Modal
-  function closePreviewModal() {
-    if (!previewModal) return;
-    previewModal.classList.remove('show');
-    setTimeout(() => {
-      previewModal.classList.add('hidden');
-    }, 200);
-  }
-
-  // Download PDF Function - Direct 1:1 Capture of Live Invoice Preview DOM
-  function downloadPDF() {
-    const element = document.querySelector('#modalA4BillContainer .a4-sheet') || document.getElementById('printableA4Bill');
-    if (!element) return;
-
-    showToast('Generating Crackers_Invoice.pdf...');
+    const currentBillNo = state.invoice.invoiceNo || 'bill';
+    showToast(`Generating Crackers_Invoice_${currentBillNo}.pdf...`);
 
     if (typeof html2pdf === 'undefined') {
       window.print();
+      resetFormForNewBill();
       return;
     }
 
     const generate = () => {
       const opt = {
         margin:       [4, 4, 4, 4],
-        filename:     'Crackers_Invoice.pdf',
+        filename:     `Crackers_Invoice_${currentBillNo}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
         html2canvas:  { 
           scale: 2, 
@@ -506,14 +852,16 @@ document.addEventListener('DOMContentLoaded', () => {
           scrollX: 0
         },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
+        pagebreak:    { mode: ['css', 'legacy'] }
       };
 
-      html2pdf().set(opt).from(element).save().then(() => {
-        showToast('PDF downloaded successfully!');
+      html2pdf().set(opt).from(invoiceTemplate).save().then(() => {
+        showToast(`Invoice ${currentBillNo} downloaded! Updated for new bill.`);
+        resetFormForNewBill();
       }).catch(err => {
         console.error('PDF export error:', err);
         window.print();
+        resetFormForNewBill();
       });
     };
 
@@ -522,6 +870,107 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       generate();
     }
+  }
+
+  // Share PDF Function - Native Web Share API with Sales History saving
+  function sharePDF() {
+    const invoiceTemplate = document.getElementById('invoice-template');
+    if (!invoiceTemplate) return;
+
+    let totalQty = 0;
+    Object.keys(state.cart).forEach(id => {
+      if (state.cart[id] > 0) totalQty += state.cart[id];
+    });
+
+    if (totalQty === 0) {
+      showToast('Cart is empty! Select items to share PDF.');
+      return;
+    }
+
+    // Save bill to Sales History & sync to Google Sheets with "Share" action mode
+    saveInvoiceToSheet('Share');
+    renderSalesHistory();
+
+    const currentBillNo = state.invoice.invoiceNo || 'Bill';
+    showToast('Preparing PDF for sharing...');
+
+    if (typeof html2pdf === 'undefined') {
+      showToast('PDF generator library not loaded.');
+      return;
+    }
+
+    const filename = `Crackers_Invoice_${currentBillNo}.pdf`;
+    const opt = {
+      margin:       [4, 4, 4, 4],
+      filename:     filename,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak:    { mode: ['css', 'legacy'] }
+    };
+
+    html2pdf().set(opt).from(invoiceTemplate).toPdf().get('pdf').then(async (pdf) => {
+      const pdfBlob = pdf.output('blob');
+      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+
+      let sharedSuccess = false;
+
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({
+            files: [pdfFile]
+          });
+          showToast(`PDF for Invoice ${currentBillNo} shared! Invoice number updated.`);
+          sharedSuccess = true;
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            console.error('File share error:', shareErr);
+            triggerFallbackShare(pdfBlob, filename);
+            sharedSuccess = true;
+          }
+        }
+      } else if (navigator.share && navigator.canShare) {
+        try {
+          await navigator.share({
+            files: [pdfFile]
+          });
+          showToast(`PDF for Invoice ${currentBillNo} shared! Invoice number updated.`);
+          sharedSuccess = true;
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            triggerFallbackShare(pdfBlob, filename);
+            sharedSuccess = true;
+          }
+        }
+      } else {
+        triggerFallbackShare(pdfBlob, filename);
+        sharedSuccess = true;
+      }
+
+      if (sharedSuccess) {
+        resetFormForNewBill();
+      }
+    }).catch(err => {
+      console.error('PDF export error for share:', err);
+      showToast('Error preparing PDF for sharing.');
+    });
+  }
+
+  function triggerFallbackShare(pdfBlob, filename) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(pdfBlob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('PDF downloaded!');
+  }
+
+  function escapeHTML(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, function(m) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+    });
   }
 
   // Load Preset Demo Order Data
@@ -538,16 +987,41 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('Loaded sample Sivakasi order!');
   }
 
-  // Render Interactive Crackers Table with ITEM CODE
+  // Render Interactive Crackers Table with ITEM CODE & Search Filtering
   function renderOrderTable() {
     if (!orderTableBody) return;
 
     let rowsHTML = '';
+    let totalVisibleItems = 0;
+    const catalog = (typeof CRACKERS_CATALOG !== 'undefined' && Array.isArray(CRACKERS_CATALOG)) ? CRACKERS_CATALOG : [];
+    const query = (state.searchQuery !== undefined && state.searchQuery !== null) ? state.searchQuery.toString().trim().toLowerCase() : '';
 
-    CRACKERS_CATALOG.forEach(cat => {
+    catalog.forEach(cat => {
+      if (!cat || !cat.items) return;
+
       if (state.activeCategory !== 'ALL' && state.activeCategory !== cat.category) {
         return;
       }
+
+      // Filter items strictly by Category, Product Code, and Product Name (completely excluding price/rate)
+      const matchingItems = cat.items.filter(item => {
+        if (!item) return false;
+        if (!query) return true;
+
+        const codeStr = (item.code !== undefined && item.code !== null) ? item.code.toString().toLowerCase() : '';
+        const nameStr = (item.name !== undefined && item.name !== null) ? item.name.toString().toLowerCase() : '';
+        const tamilStr = (item.tamilName !== undefined && item.tamilName !== null) ? item.tamilName.toString().toLowerCase() : '';
+        const catStr = (cat.category !== undefined && cat.category !== null) ? cat.category.toString().toLowerCase() : '';
+
+        return codeStr.includes(query) ||
+               nameStr.includes(query) ||
+               tamilStr.includes(query) ||
+               catStr.includes(query);
+      });
+
+      if (matchingItems.length === 0) return;
+
+      totalVisibleItems += matchingItems.length;
 
       rowsHTML += `
         <tr class="category-banner-row">
@@ -560,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </tr>
       `;
 
-      cat.items.forEach(item => {
+      matchingItems.forEach(item => {
         const qty = state.cart[item.id] || 0;
         const total = qty * item.price;
         const hasQtyClass = qty > 0 ? 'has-qty' : '';
@@ -595,6 +1069,17 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       });
     });
+
+    if (totalVisibleItems === 0) {
+      rowsHTML = `
+        <tr class="history-empty-row">
+          <td colspan="6" style="padding: 2.5rem 1rem; text-align: center; color: #64748b; font-size: 0.95rem;">
+            🔍 No crackers found matching "<strong>${escapeHTML(state.searchQuery)}</strong>"<br>
+            <span style="font-size: 0.82rem; color: #94a3b8;">Try searching strictly by Product Code (e.g. 180 or SPK-01), Product Name, or Category.</span>
+          </td>
+        </tr>
+      `;
+    }
 
     orderTableBody.innerHTML = rowsHTML;
     attachTableListeners();
@@ -673,9 +1158,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function findItemById(id) {
-    for (const cat of CRACKERS_CATALOG) {
-      const item = cat.items.find(i => i.id === id);
-      if (item) return item;
+    const catalog = (typeof CRACKERS_CATALOG !== 'undefined' && Array.isArray(CRACKERS_CATALOG)) ? CRACKERS_CATALOG : [];
+    for (const cat of catalog) {
+      if (cat && cat.items && Array.isArray(cat.items)) {
+        const item = cat.items.find(i => i.id === id);
+        if (item) return item;
+      }
     }
     return null;
   }
@@ -708,11 +1196,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLiveInvoice(totalActualMRP, totalSavings, netPayable);
   }
 
-  // Render Live A4 Invoice Sheet
+  // Render Multi-Page Paginated Live A4 Invoice Sheet (27 items per page max)
   function renderLiveInvoice(totalActualMRP = 0, totalSavings = 0, netPayable = 0) {
-    if (invSheetNo) invSheetNo.textContent = state.invoice.invoiceNo || 'SVK-2026-1001';
-    if (invSheetDate) invSheetDate.textContent = formatDateForInvoice(state.invoice.date);
-    if (invSheetPayMode) invSheetPayMode.textContent = state.invoice.paymentMode || 'Cash';
+    const invoiceTemplate = document.getElementById('invoice-template');
+    if (!invoiceTemplate) return;
 
     const selectedItems = [];
     let srNo = 1;
@@ -735,20 +1222,33 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Dynamic A4 Sheet Scaling: Auto add/remove compact-bill based on row count
-    const printableBillSheet = document.getElementById('printableA4Bill');
-    if (printableBillSheet) {
-      if (selectedItems.length > 15) {
-        printableBillSheet.classList.add('compact-bill');
-      } else {
-        printableBillSheet.classList.remove('compact-bill');
+    const ITEMS_PER_PAGE = 27;
+    const totals = { totalActualMRP, totalSavings, netPayable };
+    let fullInvoiceHTML = '';
+
+    if (selectedItems.length === 0) {
+      fullInvoiceHTML = renderInvoicePage([], 1, 1, totals);
+    } else {
+      const totalPages = Math.ceil(selectedItems.length / ITEMS_PER_PAGE);
+      for (let p = 1; p <= totalPages; p++) {
+        const startIndex = (p - 1) * ITEMS_PER_PAGE;
+        const pageItems = selectedItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+        fullInvoiceHTML += renderInvoicePage(pageItems, p, totalPages, totals);
       }
     }
 
-    if (!invTableBody) return;
+    invoiceTemplate.innerHTML = fullInvoiceHTML;
+  }
 
-    if (selectedItems.length === 0) {
-      invTableBody.innerHTML = `
+  function renderInvoicePage(pageItems, pageNum, totalPages, totals) {
+    const isLastPage = pageNum === totalPages;
+    const dateStr = formatDateForInvoice(state.invoice.date);
+    const billNo = state.invoice.invoiceNo || 'SURYA-2026-1001';
+    const payMode = state.invoice.paymentMode || 'Cash';
+
+    let tableRowsHTML = '';
+    if (pageItems.length === 0) {
+      tableRowsHTML = `
         <tr>
           <td colspan="6">
             <div class="inv-empty-msg">
@@ -759,9 +1259,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </tr>
       `;
     } else {
-      let invHTML = '';
-      selectedItems.forEach(item => {
-        invHTML += `
+      pageItems.forEach(item => {
+        tableRowsHTML += `
           <tr>
             <td class="text-center" style="font-weight: 600;">${item.srNo}</td>
             <td>
@@ -775,23 +1274,113 @@ document.addEventListener('DOMContentLoaded', () => {
           </tr>
         `;
       });
-      invTableBody.innerHTML = invHTML;
     }
 
-    if (invSubTotalMrp) invSubTotalMrp.textContent = `₹${totalActualMRP.toLocaleString('en-IN')}`;
-    if (invTotalSavings) invTotalSavings.textContent = `- ₹${totalSavings.toLocaleString('en-IN')}`;
-    if (invNetPayable) invNetPayable.textContent = `₹${netPayable.toLocaleString('en-IN')}`;
-    if (invAmountWords) {
-      invAmountWords.textContent = netPayable > 0 ? `${numberToWords(netPayable)} Only` : 'Rupees Zero Only';
+    let footerSectionHTML = '';
+    if (isLastPage) {
+      footerSectionHTML = `
+        <footer class="inv-footer-section invoice-footer">
+          <div class="inv-totals-grid">
+            <div class="inv-words-box">
+              <strong>Amount in Words:</strong>
+              <span>${totals.netPayable > 0 ? `${numberToWords(totals.netPayable)} Only` : 'Rupees Zero Only'}</span>
+            </div>
+
+            <div class="inv-amounts-box">
+              <div class="amount-row">
+                <span>Total MRP Price:</span>
+                <span>₹${totals.totalActualMRP.toLocaleString('en-IN')}</span>
+              </div>
+              <div class="amount-row savings">
+                <span>Direct Factory Discount (80%):</span>
+                <span>- ₹${totals.totalSavings.toLocaleString('en-IN')}</span>
+              </div>
+              <div class="amount-row grand-total">
+                <span>NET PAYABLE:</span>
+                <span>₹${totals.netPayable.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="inv-bottom-terms">
+            <div>
+              <strong style="color: #1e293b;">Terms & Conditions:</strong><br>
+              1. Goods once sold will not be taken back or exchanged.<br>
+              2. Store crackers in a cool, dry place away from flame.<br>
+              3. Subject to Sivakasi Jurisdiction only.
+            </div>
+            <div class="signatory-box">
+              <div>For <strong>Surya Crackers</strong></div>
+              <div class="sign-line">Authorized Signatory</div>
+            </div>
+          </div>
+          <div class="inv-page-num text-right" style="font-size: 0.65rem; color: #94a3b8; margin-top: 4px;">
+            Page ${pageNum} of ${totalPages}
+          </div>
+        </footer>
+      `;
+    } else {
+      footerSectionHTML = `
+        <footer class="inv-footer-section inv-footer-continued invoice-footer">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #64748b; font-weight: 600; padding-top: 6px; border-top: 1px dashed #cbd5e1;">
+            <span>⏩ Continued on Page ${pageNum + 1}...</span>
+            <span>Page ${pageNum} of ${totalPages}</span>
+          </div>
+        </footer>
+      `;
     }
 
-    // If modal is open, sync modal body live
-    if (previewModal && previewModal.classList.contains('show') && modalA4BillContainer) {
-      const sourceA4Bill = document.getElementById('printableA4Bill');
-      if (sourceA4Bill) {
-        modalA4BillContainer.innerHTML = sourceA4Bill.outerHTML;
-      }
-    }
+    const sheetId = pageNum === 1 ? 'id="printableA4Bill"' : '';
+
+    return `
+      <div class="a4-sheet compact-bill invoice-page" ${sheetId} data-page="${pageNum}">
+        <header class="inv-header">
+          <div class="inv-brand-row">
+            <div>
+              <div class="inv-company-name">SURYA CRACKERS</div>
+              <div class="inv-company-sub">Direct Sivakasi Crackers Manufacturer & Whole Seller</div>
+              <div class="inv-company-contact">
+                📍 3/1234/4C, Paraipatti Check Post, Viswanatham, Sivakasi - 626 189, Tamil Nadu<br>
+                📞 Mobile: +91 97862 18428 / 96292 68023
+              </div>
+            </div>
+            <div class="inv-badge-title">TAX INVOICE</div>
+          </div>
+
+          <div class="inv-meta-grid">
+            <div class="inv-meta-block">
+              <strong>BILL INFORMATION:</strong>
+              <p><strong>Date:</strong> <span>${dateStr}</span></p>
+              <p><strong>Payment Mode:</strong> <span>${payMode}</span></p>
+            </div>
+            <div class="inv-meta-block" style="text-align: right;">
+              <strong>BILL DETAILS:</strong>
+              <p><strong>Bill No:</strong> <span style="font-family: monospace; font-weight: 700;">${billNo}</span></p>
+            </div>
+          </div>
+        </header>
+
+        <div class="inv-table-wrapper">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th style="width: 32px;" class="text-center">S.No</th>
+                <th>Item Description</th>
+                <th style="width: 80px;" class="text-center">Packing</th>
+                <th style="width: 45px;" class="text-center">Qty</th>
+                <th style="width: 70px;" class="text-right">Rate (₹)</th>
+                <th style="width: 80px;" class="text-right">Amount (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHTML}
+            </tbody>
+          </table>
+        </div>
+
+        ${footerSectionHTML}
+      </div>
+    `;
   }
 
   // Indian Currency Number to Words Converter
