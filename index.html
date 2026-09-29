@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sivakasi Crackers Billing & Invoice System</title>
-  <meta name="description" content="Seamless Sivakasi Crackers Billing and Invoice System with live A4 preview and dynamic scaling.">
+  <title>Surya Crackers Billing & Invoice System</title>
+  <meta name="description" content="Seamless Surya Crackers Billing and Invoice System with live A4 preview and dynamic scaling.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💥</text></svg>">
   
   <!-- Stylesheets -->
@@ -40,6 +40,18 @@
                 <option value="Bank Transfer">Net Banking / NEFT</option>
               </select>
             </div>
+
+            <button id="btnSaveInvoice" class="btn btn-purple btn-top-save">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              Save Invoice
+            </button>
+          </div>
+
+          <!-- Product Search Input Bar -->
+          <div class="search-bar-container">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="productSearchInput" class="search-input" placeholder="🔍 Search crackers by code, English or Tamil name..." autocomplete="off">
+            <button id="btnClearSearch" class="btn-clear-search hidden" aria-label="Clear Search" title="Clear Search">&times;</button>
           </div>
 
           <!-- Category Filter Pills -->
@@ -96,19 +108,19 @@
         <div class="invoice-preview-wrapper">
           
           <!-- SINGLE INVOICE CONTAINER -->
-          <div id="invoiceContainer">
+          <div id="invoice-template">
             <!-- Printable A4 Invoice Sheet Container -->
-            <div class="a4-sheet" id="printableA4Bill">
+            <div class="a4-sheet invoice-page" id="printableA4Bill">
               
               <!-- Invoice Header -->
               <header class="inv-header">
                 <div class="inv-brand-row">
                   <div>
-                    <div class="inv-company-name">SRI VISHNU PYROTECHNICS</div>
+                    <div class="inv-company-name">SURYA CRACKERS</div>
                     <div class="inv-company-sub">Direct Sivakasi Crackers Manufacturer & Whole Seller</div>
                     <div class="inv-company-contact">
-                      📍 124/B, Sivakasi-Sattur Main Road, Sivakasi - 626123, Tamil Nadu<br>
-                      📞 Phone: +91 98421 78901 / 94431 12345 | ✉️ sales@srivishnupyro.com
+                      📍 3/1234/4C, Paraipatti Check Post, Viswanatham, Sivakasi - 626 189, Tamil Nadu<br>
+                      📞 Mobile: +91 97862 18428 / 96292 68023
                     </div>
                   </div>
                   <div class="inv-badge-title">TAX INVOICE</div>
@@ -121,9 +133,8 @@
                     <p><strong>Payment Mode:</strong> <span id="invSheetPayMode">Cash</span></p>
                   </div>
                   <div class="inv-meta-block" style="text-align: right;">
-                    <strong>DETAILS:</strong>
-                    <p><strong>Bill No:</strong> <span id="invSheetNo" style="font-family: monospace; font-weight: 700;">SVK-2026-1001</span></p>
-                    <p><strong>GSTIN:</strong> 33AAACV8921K1Z2</p>
+                    <strong>BILL DETAILS:</strong>
+                    <p><strong>Bill No:</strong> <span id="invSheetNo" style="font-family: monospace; font-weight: 700;">SURYA-2026-1001</span></p>
                   </div>
                 </div>
               </header>
@@ -148,7 +159,7 @@
               </div>
 
               <!-- Invoice Footer & Totals Section -->
-              <footer class="inv-footer-section">
+              <footer class="inv-footer-section invoice-footer">
                 <div class="inv-totals-grid">
                   <div class="inv-words-box">
                     <strong>Amount in Words:</strong>
@@ -179,7 +190,7 @@
                     3. Subject to Sivakasi Jurisdiction only.
                   </div>
                   <div class="signatory-box">
-                    <div>For <strong>Sri Vishnu Pyrotechnics</strong></div>
+                    <div>For <strong>Surya Crackers</strong></div>
                     <div class="sign-line">Authorized Signatory</div>
                   </div>
                 </div>
@@ -190,9 +201,29 @@
 
           <!-- ACTION BUTTONS BELOW A4 PREVIEW SHEET -->
           <div class="preview-actions-bar">
-            <button id="btnPreviewBill" class="btn btn-purple btn-lg">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              Preview Bill
+            <!-- Split Print Button Group with Dropdown -->
+            <div class="split-btn-container">
+              <button id="btnPrintBill" class="btn btn-success btn-lg split-main">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                Print Bill
+              </button>
+              <button id="btnPrintDropdownToggle" class="btn btn-success btn-lg split-arrow" aria-label="More Print Options" title="More Print Options">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <div id="printDropdownMenu" class="print-dropdown-menu hidden">
+                <button id="btnPrintOnly" class="print-dropdown-item">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                  <span>Print Only <small>(No Save / Sync)</small></span>
+                </button>
+              </div>
+            </div>
+            <button id="btnDownloadPDF" class="btn btn-primary btn-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Download PDF
+            </button>
+            <button id="btnSharePDF" class="btn btn-info btn-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              Share PDF
             </button>
             <button id="btnSalesHistory" class="btn btn-secondary">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -209,42 +240,6 @@
 
     </div>
   </main>
-
-  <!-- ===================================================================== -->
-  <!-- FULL SCREEN BILL PREVIEW MODAL POPUP OVERLAY                         -->
-  <!-- ===================================================================== -->
-  <div id="previewModal" class="modal-overlay hidden">
-    <div class="modal-container">
-      <header class="modal-header">
-        <div class="modal-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          Sivakasi Tax Invoice A4 Preview
-        </div>
-        <button id="btnModalCloseCross" class="modal-close-btn">&times;</button>
-      </header>
-
-      <div class="modal-body">
-        <!-- Rendered A4 Bill Content inside Modal -->
-        <div id="modalA4BillContainer" class="modal-a4-wrapper">
-          <!-- Dynamically cloned A4 Bill Sheet rendered here -->
-        </div>
-      </div>
-
-      <footer class="modal-footer">
-        <button id="btnModalPrint" class="btn btn-success btn-lg">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-          Print A4 Sheet
-        </button>
-        <button id="btnModalDownload" class="btn btn-primary btn-lg">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          Download PDF
-        </button>
-        <button id="btnModalClose" class="btn btn-secondary btn-lg">
-          Close Preview
-        </button>
-      </footer>
-    </div>
-  </div>
 
   <!-- ===================================================================== -->
   <!-- SALES HISTORY MODAL POPUP OVERLAY                                    -->
