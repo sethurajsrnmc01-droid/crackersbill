@@ -8,20 +8,20 @@ const CRACKERS_CATALOG = [
   {
     category: "ONE SOUND CRACKERS",
     items: [
-      { id: "surya-1", code: "1", name: "4\" Lakshmi", tamilName: "4\" லட்சுமி", unit: "1 Pkt", mrp: 90, price: 18 },
+      { id: "surya-1", code: "1", name: "4\" Lakshmi", tamilName: "4\" லட்சுமி", unit: "1 Pkt", mrp: 90, price: 20 },
       { id: "surya-2", code: "2", name: "3½\" Lakshmi", tamilName: "3½\" லட்சுமி", unit: "1 Pkt", mrp: 80, price: 16 },
       { id: "surya-3", code: "3", name: "2¾\" Kuruvi", tamilName: "2¾\" குருவி", unit: "1 Pkt", mrp: 35, price: 7 },
       { id: "surya-4", code: "4", name: "4\" Deluxe Lakshmi", tamilName: "4\" டீலக்ஸ் லட்சுமி", unit: "1 Pkt", mrp: 150, price: 30 },
       { id: "surya-5", code: "5", name: "4\" Gold Lakshmi", tamilName: "4\" கோல்டு லட்சுமி", unit: "1 Pkt", mrp: 160, price: 32 },
       { id: "surya-6", code: "6", name: "2 Sound Crackers", tamilName: "2 சவுண்ட்", unit: "1 Pkt", mrp: 200, price: 40 },
       { id: "surya-7", code: "7", name: "5\" Lakshmi", tamilName: "5\" லட்சுமி", unit: "1 Pkt", mrp: 250, price: 50 },
-      { id: "surya-8", code: "8", name: "6\" Lakshmi", tamilName: "6\" லட்சுமி", unit: "1 Pkt", mrp: 275, price: 55 }
+      { id: "surya-8", code: "8", name: "6\" Lakshmi", tamilName: "6\" லட்சுமி", unit: "1 Pkt", mrp: 275, price: 60 }
     ]
   },
   {
     category: "GROUND CHAKKERS",
     items: [
-      { id: "surya-9", code: "9", name: "Ground Chakker Big (10 Pcs)", tamilName: "தரைச்சக்கரம் பிக் (10 Pcs)", unit: "1 Box", mrp: 200, price: 50 },
+      { id: "surya-9", code: "9", name: "Ground Chakker Big (10 Pcs)", tamilName: "தரைச்சக்கரம் பிக் (10 Pcs)", unit: "1 Box", mrp: 200, price: 60 },
       { id: "surya-10", code: "10", name: "Ground Chakker Special", tamilName: "தரைச்சக்கரம் ஸ்பெஷல்", unit: "1 Box", mrp: 400, price: 80 },
       { id: "surya-11", code: "11", name: "Ground Chakker Deluxe", tamilName: "தரைச்சக்கரம் டீலக்ஸ்", unit: "1 Box", mrp: 750, price: 150 },
       { id: "surya-12", code: "12", name: "Spinner SPL(Plastic)", tamilName: "ஸ்பின்னர் ஸ்பெஷல்", unit: "1 Box", mrp: 800, price: 160 },
